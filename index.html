@@ -58,4 +58,32 @@
     #channel-display { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
     #status-text { font-size: 1.3rem; font-weight: bold; margin: 8px 0; color: var(--green); }
     #peers-list { font-size: 0.85rem; color: var(--muted); }
-    #net-debug { font-size: 0.75rem
+    #net-debug { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+
+    .ptt-container { flex: 1; display: flex; justify-content: center; align-items: center; }
+    #ptt-btn {
+      width: 230px; height: 230px; border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #2c313a, #181b20);
+      border: 8px solid #30363d; color: var(--text); font-size: 1.15rem; font-weight: bold;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      box-shadow: 0 12px 25px rgba(0,0,0,0.6); cursor: pointer; touch-action: none;
+    }
+    #ptt-btn svg { width: 48px; height: 48px; margin-bottom: 10px; fill: currentColor; }
+    #ptt-btn.transmitting { transform: scale(0.95); border-color: var(--red); color: #ff7b72; }
+    #ptt-btn.receiving { border-color: var(--amber); color: #e3b341; }
+
+    .footer-controls {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.8rem; color: var(--muted);
+    }
+    #disconnect-btn {
+      background: transparent; border: 1px solid #30363d; color: var(--muted);
+      padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1><span id="status-led" class="led"></span> WALKIE PTT</h1>
+    <span id="wake-badge" style="font-size: 0.75rem; color: var(--
