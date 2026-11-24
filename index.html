@@ -172,7 +172,16 @@
 
     function initAudio() {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    }
+
+    function unlockRemoteAudios() {
+      initAudio();
+      document.querySelectorAll('#audio-container audio').forEach(aud => {
+        aud.muted = false;
+        aud.volume = 1.0;
+        aud.play().catch(() => {});
+      });
     }
 
     function playBeep(freqs) {
@@ -212,7 +221,7 @@
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'playing';
           navigator.mediaSession.setActionHandler('play', () => {
-            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            unlockRemoteAudios();
           });
         }
       } catch (e) {}
@@ -238,6 +247,9 @@
         }).catch(() => {});
       }
     }
+
+    document.addEventListener('touchstart', unlockRemoteAudios, { passive: true });
+    document.addEventListener('click', unlockRemoteAudios, { passive: true });
 
     connectBtn.addEventListener('click', async () => {
       myName = document.getElementById('username').value.trim() || 'Compañero';
@@ -318,6 +330,7 @@
         } else if (data.type === 'ptt-start') {
           activeSpeaker = data.name;
           startRealKeepAlive();
+          unlockRemoteAudios();
           playBeep([[1300, 0.06]]);
           updateUI();
         } else if (data.type === 'ptt-stop') {
@@ -364,6 +377,8 @@
           document.getElementById('audio-container').appendChild(el);
         }
         el.srcObject = e.streams[0];
+        el.muted = false;
+        el.volume = 1.0;
         el.play().catch(() => {});
       };
 
@@ -414,6 +429,7 @@
     function startTalk(e) {
       if (e) e.preventDefault();
       if (isTransmitting || !localStream) return;
+      unlockRemoteAudios();
       if (navigator.vibrate) navigator.vibrate(40);
       isTransmitting = true;
       localStream.getAudioTracks().forEach(t => t.enabled = true);
