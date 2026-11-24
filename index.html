@@ -58,6 +58,7 @@
     #channel-display { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
     #status-text { font-size: 1.3rem; font-weight: bold; margin: 8px 0; color: var(--green); }
     #peers-list { font-size: 0.85rem; color: var(--muted); }
+    #net-debug { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
 
     .ptt-container { flex: 1; display: flex; justify-content: center; align-items: center; }
     #ptt-btn {
@@ -104,6 +105,7 @@
       <div id="channel-display">CANAL: ---</div>
       <div id="status-text">CANAL LIBRE</div>
       <div id="peers-list">Conectando...</div>
+      <div id="net-debug">Ruta voz: esperando compañeros</div>
     </div>
 
     <div class="ptt-container">
@@ -122,24 +124,32 @@
   <div id="audio-container" style="display:none;"></div>
 
   <script>
+    const TURN_USER = 'b4eb7d177529cda2dad6d91f';
+    const TURN_PASS = 'gLHAiFhmIEsxwXjU';
+
     const ICE_CONFIG = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:a.relay.metered.ca:80',
+          username: TURN_USER,
+          credential: TURN_PASS
         },
         {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+          username: TURN_USER,
+          credential: TURN_PASS
         },
         {
-          urls: 'turns:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:a.relay.metered.ca:443',
+          username: TURN_USER,
+          credential: TURN_PASS
+        },
+        {
+          urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+          username: TURN_USER,
+          credential: TURN_PASS
         }
       ],
       iceCandidatePoolSize: 4
@@ -170,6 +180,11 @@
 
     function log(msg) { logBox.textContent = msg; }
 
+    function updateNetDebug(text) {
+      const el = document.getElementById('net-debug');
+      if (el) el.textContent = text;
+    }
+
     function initAudio() {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
@@ -196,276 +211,4 @@
           g.gain.setValueAtTime(0.22, t);
           g.gain.exponentialRampToValueAtTime(0.01, t + dur);
           osc.connect(g); g.connect(audioCtx.destination);
-          osc.start(t); osc.stop(t + dur);
-          t += dur + 0.01;
-        });
-      } catch (e) {}
-    }
-
-    function startRealKeepAlive() {
-      try {
-        initAudio();
-        if (!keepAliveOsc && audioCtx) {
-          keepAliveOsc = audioCtx.createOscillator();
-          keepAliveGain = audioCtx.createGain();
-          keepAliveOsc.type = 'sine';
-          keepAliveOsc.frequency.setValueAtTime(20, audioCtx.currentTime);
-          keepAliveGain.gain.setValueAtTime(0.0015, audioCtx.currentTime);
-          keepAliveOsc.connect(keepAliveGain);
-          keepAliveGain.connect(audioCtx.destination);
-          keepAliveOsc.start();
-        }
-        if (audioCtx && audioCtx.state === 'suspended') {
-          audioCtx.resume().catch(() => {});
-        }
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'playing';
-          navigator.mediaSession.setActionHandler('play', () => {
-            unlockRemoteAudios();
-          });
-        }
-      } catch (e) {}
-    }
-
-    function enableKeepAlive() {
-      try {
-        silentAudioEl = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-        silentAudioEl.loop = true;
-        silentAudioEl.volume = 0.01;
-        silentAudioEl.play().catch(() => {});
-      } catch (e) {}
-      startRealKeepAlive();
-      if ('mediaSession' in navigator) {
-        try {
-          navigator.mediaSession.metadata = new MediaMetadata({ title: 'Walkie PTT', artist: channelTopic });
-          navigator.mediaSession.playbackState = 'playing';
-        } catch (e) {}
-      }
-      if ('wakeLock' in navigator) {
-        navigator.wakeLock.request('screen').then(() => {
-          document.getElementById('wake-badge').textContent = 'Pantalla activa';
-        }).catch(() => {});
-      }
-    }
-
-    document.addEventListener('touchstart', unlockRemoteAudios, { passive: true });
-    document.addEventListener('click', unlockRemoteAudios, { passive: true });
-
-    connectBtn.addEventListener('click', async () => {
-      myName = document.getElementById('username').value.trim() || 'Compañero';
-      const rawChannel = document.getElementById('channel').value.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '');
-      if (!rawChannel) { log('Escribe un nombre de canal.'); return; }
-
-      localStorage.setItem('walkie_name', myName);
-      channelTopic = `walkie-ptt-es/${rawChannel}`;
-      connectBtn.disabled = true;
-      initAudio();
-
-      log('1/2 Pidiendo micrófono...');
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          video: false
-        });
-        localStream.getAudioTracks().forEach(t => t.enabled = false);
-      } catch (e) {
-        log('Aviso: sin micrófono (' + e.name + '), entrando en modo escucha...');
-      }
-
-      log('2/2 Conectando al canal...');
-      if (typeof mqtt === 'undefined') {
-        log('Error: bloqueada la librería MQTT. Desactiva bloqueadores.');
-        connectBtn.disabled = false;
-        return;
-      }
-
-      client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
-        clientId: myId,
-        clean: true,
-        connectTimeout: 8000
-      });
-
-      client.on('connect', () => {
-        client.subscribe(channelTopic, (err) => {
-          if (err) { log('Error al suscribirse al canal.'); connectBtn.disabled = false; return; }
-          document.getElementById('login-screen').style.display = 'none';
-          document.getElementById('radio-screen').style.display = 'flex';
-          document.getElementById('channel-display').textContent = 'CANAL: ' + rawChannel;
-          document.getElementById('status-led').classList.add('online');
-          enableKeepAlive();
-          sendSignal({ type: 'join', name: myName });
-          updatePeersUI();
-        });
-      });
-
-      client.on('error', (err) => {
-        log('Error de red: ' + err.message);
-        connectBtn.disabled = false;
-      });
-
-      client.on('message', async (topic, message) => {
-        let data;
-        try { data = JSON.parse(message.toString()); } catch (e) { return; }
-        if (data.from === myId) return;
-        if (data.to && data.to !== myId) return;
-
-        if (data.type === 'join') {
-          peerNames[data.from] = data.name;
-          updatePeersUI();
-          sendSignal({ type: 'welcome', to: data.from, name: myName });
-          await createOffer(data.from);
-        } else if (data.type === 'welcome') {
-          peerNames[data.from] = data.name;
-          updatePeersUI();
-        } else if (data.type === 'offer') {
-          peerNames[data.from] = data.name;
-          updatePeersUI();
-          await handleOffer(data.from, data.sdp);
-        } else if (data.type === 'answer') {
-          if (pcs[data.from]) await pcs[data.from].setRemoteDescription(new RTCSessionDescription(data.sdp));
-        } else if (data.type === 'ice') {
-          if (pcs[data.from] && data.candidate) {
-            try { await pcs[data.from].addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) {}
-          }
-        } else if (data.type === 'ptt-start') {
-          activeSpeaker = data.name;
-          startRealKeepAlive();
-          unlockRemoteAudios();
-          playBeep([[1300, 0.06]]);
-          updateUI();
-        } else if (data.type === 'ptt-stop') {
-          activeSpeaker = null;
-          playBeep([[1400, 0.05], [1850, 0.09]]);
-          updateUI();
-        } else if (data.type === 'leave') {
-          delete peerNames[data.from];
-          if (pcs[data.from]) { pcs[data.from].close(); delete pcs[data.from]; }
-          updatePeersUI();
-        }
-      });
-    });
-
-    function sendSignal(payload) {
-      if (client && client.connected) {
-        client.publish(channelTopic, JSON.stringify({ ...payload, from: myId }));
-      }
-    }
-
-    function getPeerConnection(remoteId) {
-      if (pcs[remoteId]) pcs[remoteId].close();
-      const pc = new RTCPeerConnection(ICE_CONFIG);
-      pcs[remoteId] = pc;
-
-      if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-      } else {
-        pc.addTransceiver('audio', { direction: 'recvonly' });
-      }
-
-      pc.onicecandidate = (e) => {
-        if (e.candidate) sendSignal({ type: 'ice', to: remoteId, candidate: e.candidate });
-      };
-
-      pc.ontrack = (e) => {
-        startRealKeepAlive();
-        let el = document.getElementById('aud-' + remoteId);
-        if (!el) {
-          el = document.createElement('audio');
-          el.id = 'aud-' + remoteId;
-          el.autoplay = true;
-          el.playsInline = true;
-          document.getElementById('audio-container').appendChild(el);
-        }
-        el.srcObject = e.streams[0];
-        el.muted = false;
-        el.volume = 1.0;
-        el.play().catch(() => {});
-      };
-
-      return pc;
-    }
-
-    async function createOffer(remoteId) {
-      const pc = getPeerConnection(remoteId);
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      sendSignal({ type: 'offer', to: remoteId, name: myName, sdp: pc.localDescription });
-    }
-
-    async function handleOffer(remoteId, sdp) {
-      const pc = getPeerConnection(remoteId);
-      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      sendSignal({ type: 'answer', to: remoteId, sdp: pc.localDescription });
-    }
-
-    function updatePeersUI() {
-      const names = Object.values(peerNames);
-      document.getElementById('peers-list').textContent = names.length
-        ? `En línea (${names.length + 1}): Tú, ${names.join(', ')}`
-        : 'Conectado: Esperando compañeros...';
-    }
-
-    function updateUI() {
-      const led = document.getElementById('status-led');
-      const st = document.getElementById('status-text');
-      const lbl = document.getElementById('ptt-label');
-      if (isTransmitting) {
-        led.className = 'led busy'; st.style.color = 'var(--red)';
-        st.textContent = 'TRANSMITIENDO...'; pttBtn.className = 'transmitting';
-        lbl.textContent = 'SUELTA AL ACABAR';
-      } else if (activeSpeaker) {
-        led.className = 'led busy'; st.style.color = 'var(--amber)';
-        st.textContent = 'HABLANDO: ' + activeSpeaker.toUpperCase();
-        pttBtn.className = 'receiving'; lbl.textContent = 'ESCUCHANDO...';
-      } else {
-        led.className = 'led online'; st.style.color = 'var(--green)';
-        st.textContent = 'CANAL LIBRE'; pttBtn.className = '';
-        lbl.textContent = 'PULSA Y HABLA';
-      }
-    }
-
-    function startTalk(e) {
-      if (e) e.preventDefault();
-      if (isTransmitting || !localStream) return;
-      unlockRemoteAudios();
-      if (navigator.vibrate) navigator.vibrate(40);
-      isTransmitting = true;
-      localStream.getAudioTracks().forEach(t => t.enabled = true);
-      playBeep([[1300, 0.06]]);
-      sendSignal({ type: 'ptt-start', name: myName });
-      updateUI();
-    }
-
-    function stopTalk(e) {
-      if (e) e.preventDefault();
-      if (!isTransmitting) return;
-      isTransmitting = false;
-      localStream.getAudioTracks().forEach(t => t.enabled = false);
-      playBeep([[1400, 0.05], [1850, 0.09]]);
-      sendSignal({ type: 'ptt-stop', name: myName });
-      updateUI();
-    }
-
-    pttBtn.addEventListener('touchstart', startTalk, { passive: false });
-    pttBtn.addEventListener('touchend', stopTalk, { passive: false });
-    pttBtn.addEventListener('touchcancel', stopTalk, { passive: false });
-    pttBtn.addEventListener('mousedown', startTalk);
-    window.addEventListener('mouseup', () => { if (isTransmitting) stopTalk(); });
-
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && document.getElementById('radio-screen').style.display === 'flex' && !e.repeat) startTalk();
-    });
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' && document.getElementById('radio-screen').style.display === 'flex') stopTalk();
-    });
-
-    document.getElementById('disconnect-btn').addEventListener('click', () => {
-      sendSignal({ type: 'leave' });
-      if (client) client.end();
-      location.reload();
-    });
-  </script>
-</body>
-</html>
+          osc.
